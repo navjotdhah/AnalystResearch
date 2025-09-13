@@ -41,8 +41,14 @@ st.markdown(
     """, unsafe_allow_html=True
 )
 
+# -------------------------
+# Header
+# -------------------------
 st.title("💹 Analyst Terminal — Equity Valuation & Options")
-st.caption("Real-time modelling, DCF, comps, Black–Scholes options, and news. Built for IB/PE/AM prep. — Navjot Dhah")
+st.markdown(
+    'Real-time modelling, DCF, comps, Black–Scholes options, and news. Built for IB/PE/AM prep. — '
+    '[Navjot Dhah](https://www.linkedin.com/in/navjot-dhah-57870b238)'
+)
 
 # -------------------------
 # Sidebar
@@ -117,9 +123,7 @@ def find_row_value(df, keywords):
 def dcf_from_fcf(last_fcf, growth, discount, tg, years):
     """Simple DCF (explicit years + Gordon terminal)."""
     proj = [last_fcf * (1 + growth)**i for i in range(1, years+1)]
-    pv = sum([proj[i] / ((1 + discount)**(i+1)) * (1+discount) for i in range(len(proj))])  # safer indexing
-    # better to compute: pv = sum(proj[i]/(1+discount)^(i+1)) but we'll compute cleanly below
-    pv = sum([proj[i] / ((1 + discount)**(i+1)) for i in range(len(proj))])  # adjust to correct discounting
+    pv = sum([proj[i] / ((1 + discount)**(i+1)) for i in range(len(proj))])
     if discount <= tg:
         terminal = np.nan
     else:
@@ -194,9 +198,7 @@ col5.metric("Sector / Industry", f"{info.get('sector','N/A')} / {info.get('indus
 
 st.markdown("---")
 
-# -------------------------
 # Price chart
-# -------------------------
 st.subheader("Price chart (candles)")
 if not hist.empty:
     fig = go.Figure(data=[go.Candlestick(x=hist.index,
@@ -209,9 +211,7 @@ if not hist.empty:
 else:
     st.info("Price history not available.")
 
-# -------------------------
 # Financial statements display
-# -------------------------
 st.subheader("Financial Statements (yfinance)")
 f1, f2, f3 = st.columns(3)
 with f1:
@@ -235,29 +235,19 @@ with f3:
 
 st.markdown("---")
 
-# -------------------------
 # DCF interactive
-# -------------------------
 st.subheader("DCF Valuation (interactive)")
 
 # Attempt derive FCF
 last_fcf = None
-# common labels to search for
-ocf_labels = ["Total Cash From Operating Activities", "Net cash provided by operating activities", "Operating cash flow", "Net cash from operating activities", "Net cash provided by operating activities"]
-capex_labels = ["Capital Expenditures", "Capital Expenditure", "Purchase of property", "Purchases of property"]
-
 ocf_val = find_row_value(cf, ["operat", "cash from operating", "net cash provided"])
 capex_val = find_row_value(cf, ["capital expend", "purchase of property", "payments for property"])
 if ocf_val is not None:
     ocf_val = safe_number(ocf_val)
 if capex_val is not None:
-    capex_val = safe_number(capex_val)
-if ocf_val is not None:
-    # capex might be negative, so FCF = OCF + CAPEX
     cap = capex_val if capex_val is not None else 0.0
     last_fcf = ocf_val + cap
 
-# fallback manual input if not found
 if last_fcf is None or np.isnan(last_fcf):
     last_fcf = st.number_input("Manual: most recent unlevered FCF (USD)", value=500_000_000.0, step=1000000.0, format="%.0f")
 else:
@@ -280,57 +270,7 @@ st.metric("Enterprise value (DCF)", f"${ev_calc:,.0f}")
 st.metric("Equity value (net debt adj)", f"${equity_val:,.0f}")
 st.metric("Implied price per share", f"${implied_price:,.2f}" if not np.isnan(implied_price) else "N/A")
 
-# DCF components plot
 fig_dcf = go.Figure()
 fig_dcf.add_trace(go.Bar(x=[f"Y{i}" for i in range(1, years+1)], y=result["proj_pv"], name="Discounted FCF", marker_color="#00CC96"))
-fig_dcf.add_trace(go.Bar(x=["Terminal"], y=[terminal_pv if terminal_pv is not None else 0], name="Terminal PV", marker_color="#f5c518"))
-fig_dcf.update_layout(template="plotly_dark", barmode="stack", title="DCF PV contributions")
-st.plotly_chart(fig_dcf, use_container_width=True)
+fig_dcf.add_trace(go.Bar(x=["Terminal"], y=[terminal_pv if terminal_pv is
 
-st.markdown("---")
-
-# -------------------------
-# Options pricing (Black-Scholes)
-# -------------------------
-st.subheader("Options Pricing (Black–Scholes)")
-
-col1, col2, col3, col4, col5 = st.columns(5)
-S_default = price if not np.isnan(price) else 100.0
-S = col1.number_input("Underlying Price (S)", value=float(S_default))
-K = col2.number_input("Strike (K)", value=float(S_default))
-days = col3.number_input("Days to Expiry", min_value=1, max_value=3650, value=30)
-r = col4.number_input("Risk-free rate (annual %)", value=0.5)/100.0
-# estimate sigma (historic 30-day annualized) if hist exists
-if not hist.empty:
-    hist_ret = hist["Close"].pct_change().dropna()
-    sigma_est = hist_ret.rolling(21).std().dropna().iloc[-1] * np.sqrt(252) if len(hist_ret)>21 else hist_ret.std()*np.sqrt(252)
-    sigma_est = float(sigma_est) if not np.isnan(sigma_est) else 0.25
-else:
-    sigma_est = 0.25
-sigma = col5.number_input("Volatility (annual σ)", value=float(sigma_est), format="%.4f")
-T = days / 365.0
-
-call_val = black_scholes_price(S, K, T, r, sigma, option="call")
-put_val = black_scholes_price(S, K, T, r, sigma, option="put")
-st.write(f"Call price ≈ **${call_val:,.2f}** — Put price ≈ **${put_val:,.2f}**")
-st.caption("Black–Scholes is for European-style options; use with caution for American options.")
-
-st.markdown("---")
-
-# -------------------------
-# News feed
-# -------------------------
-st.subheader("Company News (Yahoo feed)")
-news_items = get_yahoo_news(ticker, limit=8)
-if news_items:
-    for n in news_items:
-        tlink = n.get("link") or n.get("url") or "#"
-        title = n.get("title") or "No title"
-        source = n.get("source") or ""
-        time = n.get("time") or ""
-        st.markdown(f"- [{title}]({tlink}) <small>({source}) {time}</small>", unsafe_allow_html=True)
-else:
-    st.info("No news found or Yahoo API blocked. Try again later or add a custom news source.")
-
-st.markdown("---")
-st.write("⚠️ **Caveats:** This is an interview / educational tool. Verify all values against official filings for professional use. For IB/PE-level models you should reconstruct a 3-statement model, compute WACC precisely, and model financing & dilution for projects.")
